@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0e17" />
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" href="data:," />
+  <title>ПРОМЕТЕЙ</title>
+
+  <!-- Meta Pixel Code -->
+  <script>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    // Пиксель шлём ТОЛЬКО с боевого домена. На локалке и cloudflared/ngrok-
+    // туннелях (тестирование прокладки) не инициализируем — иначе каждый
+    // эфемерный *.trycloudflare.com попадает в Meta как отдельный мусорный
+    // источник данных. Блоклист (а не allowlist), чтобы прод-домен —
+    // github.io или будущий кастомный — всегда срабатывал. Пиксель нужен ради
+    // cookie _fbp (ключ матчинга для Telegram-трафика, где fbclid нет) и
+    // браузерного PageView-сигнала Meta.
+    (function(){
+      var h = location.hostname;
+      var dev = h === 'localhost' || h === '127.0.0.1' || h === '' ||
+                h.endsWith('.trycloudflare.com') || h.endsWith('.ngrok.io') ||
+                h.endsWith('.ngrok-free.app') || h.endsWith('.local');
+      if (!dev) {
+        fbq('init', '1345428627003718');
+        fbq('track', 'PageView');
+      }
+    })();
+  </script>
+  <!-- End Meta Pixel Code -->
+
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background:
+        radial-gradient(120% 80% at 50% -10%, #17202e 0%, #0a0e17 55%, #070a11 100%);
+      color: #e8edf6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100dvh; text-align: center; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 24px; }
+    .mark {
+      font-weight: 800; letter-spacing: .28em; font-size: 20px;
+      background: linear-gradient(90deg, #ff8a3c, #ff5722);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      padding-left: .28em; /* компенсация трекинга */
+    }
+    .spinner {
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,.12);
+      border-top-color: #ff7a33;
+      animation: spin .8s linear infinite;
+    }
+    .sub { font-size: 14px; color: #8a95a8; letter-spacing: .01em; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+    /* Резервная ссылка, если авто-редирект по какой-то причине не сработал. */
+    .manual { margin-top: 6px; font-size: 13px; }
+    .manual a { color: #ff9a52; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="mark">ПРОМЕТЕЙ</div>
+    <div class="spinner" aria-hidden="true"></div>
+    <div class="sub">Открываем бота…</div>
+    <noscript>
+      <div class="sub">Нажмите, чтобы продолжить:</div>
+      <div class="manual"><a href="https://t.me/PUMP_Prometheus_bot?start=src_tgads">Открыть бота</a></div>
+    </noscript>
+  </div>
+
+  <!-- Meta Pixel <noscript> fallback -->
+  <noscript>
+    <img height="1" width="1" style="display:none"
+         src="https://www.facebook.com/tr?id=1345428627003718&ev=PageView&noscript=1" />
+  </noscript>
+
+  <script>
+  /* ─────────────────────────────────────────────────────────────────────────
+     ПРОКЛАДКА ДЛЯ TELEGRAM ADS — «отскок» без контента.
+     Ванильный порт логики prometey_landing/src/lib/fbAttribution.ts.
+
+     Задача: за доли секунды собрать сигналы матчинга (fbp/IP/UA + fbc/src),
+     сложить их в Cloudflare Worker «гардероб» под коротким токеном и сразу
+     перебросить человека в бота по deep-link ?start=fbc_<token>. Бот по токену
+     достанет данные (meta_capi.resolve_attribution) и будет слать Meta CAPI с
+     хорошим match quality — сид для lookalike-аудитории.
+
+     ВАЖНО про Telegram Ads: в таком трафике НЕТ ?fbclid (это Meta-click-id),
+     значит fbc пустой. Worker /store требует fbc ИЛИ src, поэтому мы ВСЕГДА
+     передаём src: из URL (?src=<code>) или дефолтный DEFAULT_SRC. Иначе запись
+     не создастся и fbp/IP/UA не сохранятся.
+     ───────────────────────────────────────────────────────────────────────── */
+  (function () {
+    var BOT         = "PUMP_Prometheus_bot";
+    var WORKER_URL  = "https://prometheus-fbc.mihailingggggggg.workers.dev";
+    var WRITE_KEY   = "prm_9f3Kx7Qa2Ld8Zt";      // тот же ключ, что и на основной прокладке (и так публичен)
+    var STORAGE_KEY = "prometheus_fbc";           // сохранённый полный fbc (на случай возврата)
+    var DEFAULT_SRC = "tgads";                    // разблокирует хранение для трафика без fbclid
+    var SRC_RE      = /^[A-Za-z0-9]{1,32}$/;
+
+    var FBP_WAIT_MS   = 2000;   // ждём, пока пиксель поставит cookie _fbp (асинхронно)
+    var FBP_STEP_MS   = 200;
+    var STORE_TIMEOUT = 2500;   // максимум на запрос к Worker /store
+    var HARD_TIMEOUT  = 4500;   // общий предохранитель: не застреваем на лоадере
+
+    function readCookie(name) {
+      var m = document.cookie.match(new RegExp("(?:^|;\\s*)" + name + "=([^;]+)"));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+    function qs(name) {
+      try { return new URLSearchParams(window.location.search).get(name); }
+      catch (e) { return null; }
+    }
+
+    // Полный fbc (fb.1.<ts>.<fbclid>): cookie _fbc → из ?fbclid → localStorage.
+    function resolveFbc() {
+      var fbc = readCookie("_fbc");
+      if (!fbc) {
+        var fbclid = qs("fbclid");
+        if (fbclid) fbc = "fb.1." + Date.now() + "." + fbclid;
+      }
+      if (fbc) {
+        try { localStorage.setItem(STORAGE_KEY, fbc); } catch (e) {}
+        return fbc;
+      }
+      try { return localStorage.getItem(STORAGE_KEY); } catch (e) { return null; }
+    }
+
+    function readSrc() {
+      var src = qs("src");
+      return src && SRC_RE.test(src) ? src : null;
+    }
+
+    // Пиксель ставит _fbp асинхронно (fbevents.js грузится отдельно) — поллим.
+    function waitForFbp() {
+      return new Promise(function (resolve) {
+        var started = Date.now();
+        (function tick() {
+          var fbp = readCookie("_fbp");
+          if (fbp || Date.now() - started >= FBP_WAIT_MS) resolve(fbp);
+          else setTimeout(tick, FBP_STEP_MS);
+        })();
+      });
+    }
+
+    // POST /store → { token }. Возвращает токен или null (тихий фолбэк).
+    function storeAttribution(fbc, src) {
+      if (!fbc && !src) return Promise.resolve(null);
+      return waitForFbp().then(function (fbp) {
+        var payload = { src: src };
+        if (fbc) payload.fbc = fbc;
+        if (fbp) payload.fbp = fbp;
+        var ctrl = new AbortController();
+        var timer = setTimeout(function () { ctrl.abort(); }, STORE_TIMEOUT);
+        return fetch(WORKER_URL + "/store", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Write-Key": WRITE_KEY },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal
+        }).then(function (res) {
+          clearTimeout(timer);
+          if (!res.ok) return null;
+          return res.json();
+        }).then(function (data) {
+          return data && typeof data.token === "string" ? data.token : null;
+        }).catch(function () { clearTimeout(timer); return null; });
+      });
+    }
+
+    var done = false;
+    function go(startParam) {
+      if (done) return;
+      done = true;
+      window.location.replace("https://t.me/" + BOT + "?start=" + startParam);
+    }
+
+    var fbc = resolveFbc();
+    var src = readSrc();
+    if (!fbc && !src) src = DEFAULT_SRC;          // гарантируем src → Worker сохранит fbp/IP/UA
+    var fallback = "src_" + (src || "website");    // без токена хотя бы источник (fbp/ip не будет)
+
+    // Предохранитель: что бы ни случилось — уходим в бота.
+    setTimeout(function () { go(fallback); }, HARD_TIMEOUT);
+
+    storeAttribution(fbc, src).then(function (token) {
+      go(token ? "fbc_" + token : fallback);
+    }).catch(function () { go(fallback); });
+  })();
+  </script>
+</body>
+</html>
