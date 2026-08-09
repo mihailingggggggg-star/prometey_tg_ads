@@ -1,12 +1,22 @@
-# prometey_tg_ads — прокладка для Telegram Ads
+# prometey_tg_ads — прокладка/Mini App для Telegram Ads
 
-Content-less «отскок» для трафика с **Telegram Ads**. Задача: собрать сигналы
-матчинга Meta и сразу перекинуть человека в бота, чтобы его события
-(StartTrial/Purchase) попадали в **Meta Events Manager** с хорошим match quality —
-сид для **lookalike-аудитории**.
+Content-less «отскок»: собирает сигналы матчинга Meta (fbp/IP/UA + fbc/src) и
+уводит человека в бота, чтобы его события (StartTrial/Purchase) попадали в **Meta
+Events Manager** с хорошим match quality — сид для **lookalike-аудитории**.
 
-Это НЕ лендинг с контентом. Один файл `index.html`: быстрый лоадер → сбор данных →
-авто-редирект в `t.me/PUMP_Prometheus_bot?start=fbc_<token>`.
+Один файл `index.html`, работает в **двух режимах** (определяется автоматически):
+
+- **Telegram Mini App** (боевой заход из Telegram Ads). Официальный кабинет Telegram
+  Ads НЕ пускает внешние ссылки — только `t.me/…`, поэтому реклама ведёт на
+  **Direct Link Mini App** `t.me/PUMP_Prometheus_bot/<app>?startapp=<код>`. Страница
+  открывается в webview Telegram: есть `initData` (юзер + `start_param`), код
+  кампании берётся из `start_param`, а уход в бота — через `tg.openTelegramLink`.
+- **Обычная веб-страница** (посевы: клик по ссылке `…/?src=<код>` в посте канала/
+  чата или внешняя реклама). `initData` пуст → код из `?src`, уход через
+  `window.location`.
+
+Пиксель, сбор атрибуции, токен «гардероба» и телеметрия — **одинаковые** в обоих
+режимах. Бота и Worker менять не нужно.
 
 ## Как работает
 
@@ -40,15 +50,28 @@ Content-less «отскок» для трафика с **Telegram Ads**. Зад�
 
 Тот же Worker и pixel, что у `prometey_landing` — **менять их и бота не нужно**.
 
+## Регистрация Mini App (BotFather) — один раз
+
+1. @BotFather → `/newapp` → выбрать бота `PUMP_Prometheus_bot`.
+2. Title / короткое описание / картинку (640×360) — по вкусу.
+3. **Web App URL:** `https://mihailingggggggg-star.github.io/prometey_tg_ads/`
+4. **Short name:** напр. `go` → появится ссылка `t.me/PUMP_Prometheus_bot/go`.
+
+Ссылка кампании для рекламы: `t.me/PUMP_Prometheus_bot/go?startapp=<код>` — код
+прилетит в `start_param`. Проверить, какие формы принимает кабинет Telegram Ads
+(с `?startapp=` и без).
+
 ## Использование
 
-Ставим URL прокладки как ссылку объявления в Telegram Ads:
+- **Telegram Ads (официальный кабинет):** ссылка объявления —
+  `t.me/PUMP_Prometheus_bot/go?startapp=<код>` (Mini App режим).
+- **Посевы (посты в каналах/чатах) и внешняя реклама:** ссылка —
+  `https://<pages-url>/?src=<код>` (веб-режим).
 
-- по умолчанию: `https://<pages-url>/` → источник `tgads`;
-- под конкретную кампанию: `https://<pages-url>/?src=<code>`, где `<code>` —
-  `[A-Za-z0-9]{1,32}`. Чтобы этот `src` завёлся в воронке «Посевы» сервис-бота,
-  код должен существовать в `ad_sources` (создать через админку). На CAPI это не
-  влияет — fbp/IP/UA собираются в любом случае.
+`<код>` — `[A-Za-z0-9]{1,32}`. Чтобы код завёлся в воронке «Посевы» сервис-бота,
+он должен существовать в `ad_sources` (создать через админку → «🔵 Telegram Ads»).
+На CAPI это не влияет — fbp/IP/UA собираются в любом случае. Без кода —
+`DEFAULT_SRC=tgads`.
 
 ## Деплой (GitHub Pages)
 
