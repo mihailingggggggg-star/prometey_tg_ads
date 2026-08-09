@@ -249,12 +249,49 @@
 
     beacon("enter");                              // считаем ВСЕ заходы (до ожидания — учтём и отвалы)
 
-    // Предохранитель: что бы ни случилось — уходим в бота.
-    setTimeout(function () { go(fallback); }, HARD_TIMEOUT);
+    // Mini App (реклама): спрашиваем право писать (для дожима недошедших) → кладём
+    // открытие в Worker /miniapp (отдаёт token для хендофа) → уводим в бота.
+    // Веб (посевы): обычный store + редирект, с предохранителем на зависание.
+    function runMiniApp() {
+      var user = tg.initDataUnsafe && tg.initDataUnsafe.user;
+      var already = !!(user && user.allows_write_to_pm);   // право уже есть → окно не показываем
+      // Бэкстоп: если callback так и не пришёл (редкий сбой клиента) — всё равно уводим.
+      setTimeout(function () { go(fallback); }, 15000);
+      function afterWA(granted) {
+        waitForFbp().then(function (fbp) {
+          var payload = { initData: tg.initData, src: src, wa: !!granted };
+          if (fbp) payload.fbp = fbp;
+          var ctrl = new AbortController();
+          var timer = setTimeout(function () { ctrl.abort(); }, STORE_TIMEOUT);
+          fetch(WORKER_URL + "/miniapp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Write-Key": WRITE_KEY },
+            body: JSON.stringify(payload),
+            signal: ctrl.signal
+          }).then(function (r) { clearTimeout(timer); return r.ok ? r.json() : null; })
+            .then(function (d) { go(d && d.token ? "fbc_" + d.token : fallback); })
+            .catch(function (e) {
+              clearTimeout(timer);
+              beacon("error", e && e.name === "AbortError" ? "timeout" : "network");
+              go(fallback);
+            });
+        });
+      }
+      if (already) { afterWA(true); return; }
+      if (tg.requestWriteAccess) {
+        try { tg.requestWriteAccess(function (granted) { afterWA(!!granted); }); }
+        catch (e) { afterWA(false); }
+      } else { afterWA(false); }
+    }
 
-    storeAttribution(fbc, src).then(function (token) {
-      go(token ? "fbc_" + token : fallback);
-    }).catch(function () { go(fallback); });
+    if (isMiniApp) {
+      runMiniApp();
+    } else {
+      setTimeout(function () { go(fallback); }, HARD_TIMEOUT);   // предохранитель веб-режима
+      storeAttribution(fbc, src).then(function (token) {
+        go(token ? "fbc_" + token : fallback);
+      }).catch(function () { go(fallback); });
+    }
   })();
   </script>
 </body>
