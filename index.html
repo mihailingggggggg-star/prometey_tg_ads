@@ -112,10 +112,30 @@
     var DEFAULT_SRC = "tgads";                    // разблокирует хранение для трафика без fbclid
     var SRC_RE      = /^[A-Za-z0-9]{1,32}$/;
 
-    var FBP_WAIT_MS   = 2000;   // ждём, пока пиксель поставит cookie _fbp (асинхронно)
-    var FBP_STEP_MS   = 200;
+    var FBP_WAIT_MS   = 1500;   // ждём, пока пиксель поставит cookie _fbp (асинхронно)
+    var FBP_STEP_MS   = 150;
     var STORE_TIMEOUT = 2500;   // максимум на запрос к Worker /store
-    var HARD_TIMEOUT  = 4500;   // общий предохранитель: не застреваем на лоадере
+    var HARD_TIMEOUT  = 3500;   // общий предохранитель: не застреваем на лоадере
+
+    // ── Телеметрия воронки (см. Worker /track): enter (открыл) → redirect (ушёл в
+    // бота) → error (сбой атрибуции, с причиной). sendBeacon не блокирует и
+    // переживает уход со страницы, поэтому НИКОГДА не задерживает редирект.
+    var trackSrc = "";          // код кампании (ставится ниже, из ?src или DEFAULT_SRC)
+    function beacon(event, reason) {
+      try {
+        if (!trackSrc) return;
+        var payload = { src: trackSrc, event: event };
+        if (reason) payload.reason = reason;
+        var body = JSON.stringify(payload);
+        var url = WORKER_URL + "/track";
+        if (navigator.sendBeacon) {
+          // text/plain — чтобы не было CORS-preflight (sendBeacon его не умеет).
+          navigator.sendBeacon(url, new Blob([body], { type: "text/plain" }));
+        } else {
+          fetch(url, { method: "POST", body: body, keepalive: true }).catch(function () {});
+        }
+      } catch (e) {}
+    }
 
     function readCookie(name) {
       var m = document.cookie.match(new RegExp("(?:^|;\\s*)" + name + "=([^;]+)"));
@@ -173,11 +193,15 @@
           signal: ctrl.signal
         }).then(function (res) {
           clearTimeout(timer);
-          if (!res.ok) return null;
+          if (!res.ok) { beacon("error", "store_" + res.status); return null; }
           return res.json();
         }).then(function (data) {
           return data && typeof data.token === "string" ? data.token : null;
-        }).catch(function () { clearTimeout(timer); return null; });
+        }).catch(function (e) {
+          clearTimeout(timer);
+          beacon("error", e && e.name === "AbortError" ? "timeout" : "network");
+          return null;
+        });
       });
     }
 
@@ -185,13 +209,17 @@
     function go(startParam) {
       if (done) return;
       done = true;
+      beacon("redirect");                          // ушёл в бота (sendBeacon переживёт уход)
       window.location.replace("https://t.me/" + BOT + "?start=" + startParam);
     }
 
     var fbc = resolveFbc();
     var src = readSrc();
     if (!fbc && !src) src = DEFAULT_SRC;          // гарантируем src → Worker сохранит fbp/IP/UA
+    trackSrc = src;                               // телеметрия по коду кампании (или tgads)
     var fallback = "src_" + (src || "website");    // без токена хотя бы источник (fbp/ip не будет)
+
+    beacon("enter");                              // считаем ВСЕ заходы (до ожидания — учтём и отвалы)
 
     // Предохранитель: что бы ни случилось — уходим в бота.
     setTimeout(function () { go(fallback); }, HARD_TIMEOUT);
