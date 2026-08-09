@@ -63,15 +63,47 @@
       -webkit-background-clip: text; background-clip: text; color: transparent;
       padding-left: .28em; /* компенсация трекинга */
     }
-    .spinner {
-      width: 44px; height: 44px; border-radius: 50%;
-      border: 3px solid rgba(255,255,255,.12);
-      border-top-color: #ff7a33;
-      animation: spin .8s linear infinite;
-    }
     .sub { font-size: 14px; color: #8a95a8; letter-spacing: .01em; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
+    /* ── Анимация: кольцо-спиннер → пламя → галочка (плавно, стиль Apple Pay) ──
+       Всё на GPU (transform/opacity) + рисование SVG-обводки (stroke-dashoffset),
+       по одному анимационному треку на элемент (без конфликтов), мягкие безье. */
+    .scene { position: relative; width: 116px; height: 116px; }
+    .scene::before {                       /* тёплое свечение под сценой */
+      content: ""; position: absolute; inset: 8px; border-radius: 50%;
+      background: radial-gradient(closest-side, rgba(255,122,51,.40), transparent 70%);
+      filter: blur(7px); animation: glow 2.2s ease-in-out infinite;
+    }
+    .anim { position: relative; width: 100%; height: 100%; overflow: visible; }
+    .anim .ring, .anim .success {
+      transform-box: view-box; transform-origin: 60px 60px;
+    }
+    @keyframes glow { 0%,100% { opacity:.5; transform:scale(.9);} 50% { opacity:.95; transform:scale(1.06);} }
+
+    /* Кольцо-спиннер: раскручивается и мягко тает, уступая галочке */
+    .ring { animation: ringLife .9s cubic-bezier(.5,.1,.4,1) forwards; }
+    @keyframes ringLife {
+      0%   { opacity: 0; transform: rotate(0deg)   scale(.7); }
+      16%  { opacity: 1; transform: rotate(80deg)  scale(1);  }
+      70%  { opacity: 1; transform: rotate(520deg) scale(1);  }
+      100% { opacity: 0; transform: rotate(600deg) scale(.55);}
+    }
+    /* Успех: круг рисуется, галочка дорисовывается, с лёгким «поп» */
+    .success { opacity: 0; animation: succPop .5s cubic-bezier(.2,1.35,.35,1) .70s forwards; }
+    @keyframes succPop {
+      0%   { opacity: 0; transform: scale(.6); }
+      60%  { opacity: 1; transform: scale(1.07); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    .succ-ring  { stroke-dasharray: 189; stroke-dashoffset: 189; animation: draw .44s ease-out .76s forwards; }
+    .succ-check { stroke-dasharray: 60;  stroke-dashoffset: 60;  animation: draw .30s ease-out 1.04s forwards; }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+
+    @media (prefers-reduced-motion: reduce) {   /* без движения — сразу готовая галочка */
+      .scene::before, .ring { animation: none; opacity: 0; }
+      .success { animation: none; opacity: 1; transform: none; }
+      .succ-ring, .succ-check { animation: none; stroke-dashoffset: 0; }
+    }
     /* Резервная ссылка, если авто-редирект по какой-то причине не сработал. */
     .manual { margin-top: 6px; font-size: 13px; }
     .manual a { color: #ff9a52; text-decoration: none; }
@@ -80,7 +112,27 @@
 <body>
   <div class="wrap">
     <div class="mark">ПРОМЕТЕЙ</div>
-    <div class="spinner" aria-hidden="true"></div>
+    <div class="scene" aria-hidden="true">
+      <svg class="anim" viewBox="0 0 120 120">
+        <defs>
+          <linearGradient id="fireGrad" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0%"   stop-color="#ff3d00"/>
+            <stop offset="55%"  stop-color="#ff8a3c"/>
+            <stop offset="100%" stop-color="#ffd24d"/>
+          </linearGradient>
+        </defs>
+        <circle class="ring" cx="60" cy="60" r="26" fill="none"
+                stroke="url(#fireGrad)" stroke-width="5" stroke-linecap="round"
+                stroke-dasharray="70 200"/>
+        <g class="success">
+          <circle class="succ-ring" cx="60" cy="60" r="30" fill="none"
+                  stroke="url(#fireGrad)" stroke-width="5" stroke-linecap="round"
+                  transform="rotate(-90 60 60)"/>
+          <path class="succ-check" d="M45 61 l11 12 l24 -27" fill="none"
+                stroke="url(#fireGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </svg>
+    </div>
     <div class="sub">Открываем бота…</div>
     <noscript>
       <div class="sub">Нажмите, чтобы продолжить:</div>
@@ -241,6 +293,16 @@
       }
     }
 
+    // Анимация лоадер→галочка длится ~1.35с. Редирект ждёт, пока анимация дойдёт
+    // до галочки И данные готовы — так человек всегда видит её целиком. Обычно
+    // данные готовятся дольше анимации; если быстрее — держим галочку. Жёсткие
+    // предохранители ниже (go напрямую) не ждут анимацию — крайний случай.
+    var ANIM_MS = 1400;
+    var _animDone = false, _pending = null;
+    setTimeout(function () { _animDone = true; _flush(); }, ANIM_MS);
+    function finish(startParam) { _pending = startParam; _flush(); }
+    function _flush() { if (_animDone && _pending !== null) go(_pending); }
+
     var fbc = resolveFbc();
     var src = readSrc();
     if (!fbc && !src) src = DEFAULT_SRC;          // гарантируем src → Worker сохранит fbp/IP/UA
@@ -269,11 +331,11 @@
             body: JSON.stringify(payload),
             signal: ctrl.signal
           }).then(function (r) { clearTimeout(timer); return r.ok ? r.json() : null; })
-            .then(function (d) { go(d && d.token ? "fbc_" + d.token : fallback); })
+            .then(function (d) { finish(d && d.token ? "fbc_" + d.token : fallback); })
             .catch(function (e) {
               clearTimeout(timer);
               beacon("error", e && e.name === "AbortError" ? "timeout" : "network");
-              go(fallback);
+              finish(fallback);
             });
         });
       }
@@ -289,8 +351,8 @@
     } else {
       setTimeout(function () { go(fallback); }, HARD_TIMEOUT);   // предохранитель веб-режима
       storeAttribution(fbc, src).then(function (token) {
-        go(token ? "fbc_" + token : fallback);
-      }).catch(function () { go(fallback); });
+        finish(token ? "fbc_" + token : fallback);
+      }).catch(function () { finish(fallback); });
     }
   })();
   </script>
