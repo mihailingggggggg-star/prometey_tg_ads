@@ -189,9 +189,10 @@
     // бота) → error (сбой атрибуции, с причиной). sendBeacon не блокирует и
     // переживает уход со страницы, поэтому НИКОГДА не задерживает редирект.
     var trackSrc = "";          // код кампании (ставится ниже, из ?src или DEFAULT_SRC)
+    var countThis = true;       // считать ли этот заход (не бот / не повторное открытие) — выставится ниже
     function beacon(event, reason) {
       try {
-        if (!trackSrc) return;
+        if (!trackSrc || !countThis) return;   // боты и дубли не пишем — иначе воронка задваивается
         var payload = { src: trackSrc, event: event };
         if (reason) payload.reason = reason;
         var body = JSON.stringify(payload);
@@ -309,7 +310,31 @@
     trackSrc = src;                               // телеметрия по коду кампании (или tgads)
     var fallback = "src_" + (src || "website");    // без токена хотя бы источник (fbp/ip не будет)
 
-    beacon("enter");                              // считаем ВСЕ заходы (до ожидания — учтём и отвалы)
+    // Дедуп телеметрии: считаем заход ОДИН раз на человека, а не на каждую загрузку.
+    // (1) отсев автоматизации/краулеров; (2) один браузер по одному коду в пределах
+    // VISIT_TTL = 1 заход (повторные открытия, рефреш, возврат из бота, обе ссылки
+    // одного кода не задваивают). Разные реальные пользователи (разные браузеры)
+    // считаются каждый. Атрибуцию (store/miniapp) это НЕ трогает — только счётчики.
+    function isBot() {
+      try {
+        if (navigator.webdriver) return true;
+        var ua = (navigator.userAgent || "").toLowerCase();
+        return /bot|crawl|spider|slurp|preview|facebookexternalhit|telegrambot|headless|phantom|lighthouse|pingdom|uptime/.test(ua);
+      } catch (e) { return false; }
+    }
+    var VISIT_TTL = 6 * 60 * 60 * 1000;           // 6ч
+    function firstVisit(code) {
+      try {
+        var k = "prm_visit_" + code, now = Date.now();
+        var prev = parseInt(localStorage.getItem(k) || "0", 10);
+        if (prev && now - prev < VISIT_TTL) return false;
+        localStorage.setItem(k, String(now));
+        return true;
+      } catch (e) { return true; }                // нет storage — не мешаем счёту
+    }
+    countThis = !isBot() && firstVisit(src);      // enter/redirect/error пишутся только для реального нового захода
+
+    beacon("enter");                              // реальные заходы (дедуп/боты отсеяны в countThis)
 
     // Mini App (реклама): спрашиваем право писать (для дожима недошедших) → кладём
     // открытие в Worker /miniapp (отдаёт token для хендофа) → уводим в бота.
