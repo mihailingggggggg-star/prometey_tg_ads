@@ -310,19 +310,34 @@
     trackSrc = src;                               // телеметрия по коду кампании (или tgads)
     var fallback = "src_" + (src || "website");    // без токена хотя бы источник (fbp/ip не будет)
 
-    // Дедуп телеметрии: считаем заход ОДИН раз на человека, а не на каждую загрузку.
-    // (1) отсев автоматизации/краулеров; (2) один браузер по одному коду в пределах
-    // VISIT_TTL = 1 заход (повторные открытия, рефреш, возврат из бота, обе ссылки
-    // одного кода не задваивают). Разные реальные пользователи (разные браузеры)
-    // считаются каждый. Атрибуцию (store/miniapp) это НЕ трогает — только счётчики.
+    // Считаем заход ТОЛЬКО для реального человека и один раз на браузер/код — иначе
+    // публичная авто-редиректная страница на github.io накручивается JS-краулерами
+    // (каждый со своим localStorage, поэтому дедуп их не ловит), а enter/redirect
+    // улетают в разы. Признак этой накрутки: redirect есть, а в бот (started) 0.
+    // Атрибуцию (store/miniapp/token) это НЕ трогает — гейт только на счётчики.
     function isBot() {
       try {
         if (navigator.webdriver) return true;
         var ua = (navigator.userAgent || "").toLowerCase();
-        return /bot|crawl|spider|slurp|preview|facebookexternalhit|telegrambot|headless|phantom|lighthouse|pingdom|uptime/.test(ua);
+        if (!ua) return true;
+        return /bot|crawl|spider|slurp|preview|facebookexternalhit|telegrambot|headless|phantom|selenium|puppeteer|playwright|lighthouse|pingdom|uptime|monitor|scan|curl|wget|python|axios|go-http|java\//.test(ua);
       } catch (e) { return false; }
     }
-    var VISIT_TTL = 6 * 60 * 60 * 1000;           // 6ч
+    // Реальный посетитель: в Mini App — подписанный Telegram-юзер (краулер такое не
+    // подделает, это надёжный сигнал ТГ-трафика); в вебе — не автоматизация, есть
+    // языки браузера и вкладка видима (краулеры часто без языков / в фоне / headless).
+    function humanVisitor() {
+      if (isMiniApp) {
+        return !!(tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id);
+      }
+      try {
+        if (isBot()) return false;
+        if (!(navigator.languages && navigator.languages.length)) return false;
+        if (typeof document.visibilityState === "string" && document.visibilityState !== "visible") return false;
+        return true;
+      } catch (e) { return true; }
+    }
+    var VISIT_TTL = 6 * 60 * 60 * 1000;           // 6ч: то же открытие в том же браузере не пересчитываем
     function firstVisit(code) {
       try {
         var k = "prm_visit_" + code, now = Date.now();
@@ -332,9 +347,11 @@
         return true;
       } catch (e) { return true; }                // нет storage — не мешаем счёту
     }
-    countThis = !isBot() && firstVisit(src);      // enter/redirect/error пишутся только для реального нового захода
+    // Короткое условие: боты (humanVisitor=false) не занимают слот дедупа (firstVisit
+    // не зовётся), поэтому реальный человек после бота всё равно посчитается.
+    countThis = humanVisitor() && firstVisit(src);
 
-    beacon("enter");                              // реальные заходы (дедуп/боты отсеяны в countThis)
+    beacon("enter");                              // реальные заходы (боты/дубли отсеяны в countThis)
 
     // Mini App (реклама): спрашиваем право писать (для дожима недошедших) → кладём
     // открытие в Worker /miniapp (отдаёт token для хендофа) → уводим в бота.
